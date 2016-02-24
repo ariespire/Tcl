@@ -15,7 +15,7 @@ puts $outFp "======================================"
 set cellList [get_cell *]
 set VtswapCnt 0
 set SizeswapCnt 0
-
+set k 1
 
 proc ComputeSensitivity { cellName operation } {
 
@@ -52,140 +52,119 @@ proc ComputeSensitivity { cellName operation } {
 	return $Sensitivity
 }
 
-
-set k 1
-
 foreach_in_collection cell $cellList {
     set cellName [get_attri $cell base_name]
     set libcellName [get_attri $cell ref_name]
-
     if {$libcellName == "ms00f80"} {
         continue
     }
-
-    if { ![regexp {[a-z][a-z][0-9][0-9][smf]01} $libcellName] } {
-    dict set M m$k target $cellName
-    dict set M m$k change "downsize"
-    dict set M m$k sensitivity [ComputeSensitivity $cellName "downsize"]
-    incr k
-    }
-    if { ![regexp {[a-z][a-z][0-9][0-9]s[0-9][0-9]} $libcellName] } {
-       dict set M m$k target $cellName
-    dict set M m$k change "upscale"
-    dict set M m$k sensitivity [ComputeSensitivity $cellName "upscale"]
-    incr k
-    }
-	
-    #set_user_attribute $cell CellSensitivity [dict get M sensitivity]
+    set downsizable [![regexp {[a-z][a-z][0-9][0-9][smf]01} $libcellName]]
+    set upscable [![regexp {[a-z][a-z][0-9][0-9]s[0-9][0-9]} $libcellName]] 
+	if { $downsizable == 1 } {
+		set cellsensivity1 [ComputeSensitivity $cellName "downsize"]
+	}
+	if { $upscable == 1 } {
+		set cellsensitivity2 [ComputeSensitivity $cellName "upscale"]
+	}
+	if { $downsizable && $upscable } {
+		if { $cellsensivity1 > $cellsensivity2 } {   
+    		dict set M m$k target $cellName
+    		dict set M m$k change "downsize"
+    		dict set M m$k sensitivity $cellsensivity1
+    		incr k
+    	}
+		else {      
+ 			dict set M m$k target $cellName
+    		dict set M m$k change "upscale"
+    		dict set M m$k sensitivity $cellsensivity2 
+    		incr k
+    	}
+	}
+	if { $downsizable && [!$upscable] } {
+		dict set M m$k target $cellName
+    	dict set M m$k change "downsize"
+    	dict set M m$k sensitivity $cellsensivity1
+    	incr k
+	}
+	if { [!$downsizable] && $upscable } {
+		dict set M m$k target $cellName
+    	dict set M m$k change "upscale"
+    	dict set M m$k sensitivity $cellsensivity2
+    	incr k
+	}
 }
 
 puts $M
-
-
-
-
-
-
-
-
-
 
 while { [dict size $M] } {
     set maxsen 0
     set maxsencell 0
     foreach id [dict keys $M] {
-        if { [dict get $M $id sensitivity] > maxsen } {
+        if { [dict get $M $id sensitivity] > $maxsen } {
             set maxsen [dict get $M $id sensitivity]
             set maxsencell $id
         }
     }
-    set tempchange downsize
     set tempcellname [dict get $M $maxsencell target]
-    set tempcell [get_cell $tempcellname ]
-    set templibcell [get_attri $tempcell ref_name]
-    set newlibcell [getNextSizeDown $templibcell]
-    if { [dict get $M $maxsencell change] == "downsize"} {
-        size_cell tempcell $newlibcell
+puts $tempcellname 
+   set tempcell [get_cell $tempcellname ]
+puts $tempcell 
+   set templibcellname [get_attri $tempcell ref_name]
+puts $templibcellname 
+ 
+    if { [dict get $M $maxsencell change] == "downsize" } {
+        set newlibcellname [getNextSizeDown $templibcellname]
+		set tempchange downsize
+puts $newlibcellname
     }
-    else if { [dict get $M $maxsencell change] == "upscale" } {
-        set tempchange upscale
-        set tempcellname [dict get $M $maxsencell target]
-        set tempcell [get_cell $tempcellname ]
-        set templibcell [get_attri $tempcell  ref_name]
-        set newlibcell [getNextVtDown $templibcell]
-        size_cell $tempcell $newlibcell
-        }
-    dict remove $M $maxsencell    
+    if { [dict get $M $maxsencell change] == "upscale" } {
+        set newlibcellname [getNextVtDown $templibcellname]
+		set tempchange upscale
+puts $newlibcellname   
+ 	}
+ 	
+    size_cell $tempcell $newlibcellname
+    set M [dict remove $M $maxsencell]    
+    
     set newWNS [ PtWorstSlack clk ]
     if { $newWNS < 0.0 } {
-            size_cell $tempcell $templibcell
-    } else  if { ![regexp {[a-z][a-z][0-9][0-9][smf]01} $newlibcell] } {
-        dict set M m$k target $tempcellname
-        dict set M m$k change "downsize"
-        dict set M m$k sensitivity [ComputeSensitivity $tempcellname "downsize"]
-        incr k
-        }
-        else if { ![regexp {[a-z][a-z][0-9][0-9]s[0-9][0-9]} $newlibcell] } {
-           dict set M m$k target $tempcellname
-        dict set M m$k change "upscale"
-        dict set M m$k sensitivity [ComputeSensitivity $tempcellname "upscale"]
-        incr k
-        }
-    }
-}
+        size_cell $tempcell $templibcellname
+		puts $outFp "- Negslack, reverting change ..."  
+  	} else {
+  		if { ($tempchange == "downsize" } {
+			incr SizeswapCnt
+            puts $outFp "- cell ${tempcellname} is swapped to $newlibcellname"
+		}
+  		if { $tempchange == "upscale" } {
+			incr VtswapCnt
+            puts $outFp "- cell ${tempcellname} is swapped to $newlibcellname"
+		}
+  	}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-#set cellListM [sort_collection -descending $cellList { CellSensitivty }]
-set cellListM [sort_collection -descending $M { [dict get M sensitivity] }]
-puts $cellListM
-
-foreach_in_collection cell $cellListM {
-    set cellName [get_attri $cell base_name]
-    set libcell [get_lib_cells -of_objects $cellName]
-    set libcellName [get_attri $libcell base_name]
-    if {$libcellName == "ms00f80"} {
-        continue
-    }
-	set CellOperation [dict get M change]
-	if { $CellOperation == "downsize" } {
-	    set newlibcellName [getNextSizeDown $libcellName]
-	    size_cell $cellName $newlibcellName
-            set newWNS [ PtWorstSlack clk ]
-            if { $newWNS < 0.0 } {
-                size_cell $cellName $libcellName
-            } else {
-                incr VtswapCnt
-
-
-                puts $outFp "- cell ${cellName} is swapped to $newlibcellName"
-            }
+    set downsizable [![regexp {[a-z][a-z][0-9][0-9][smf]01} $newlibcellname]]
+    set upscable [![regexp {[a-z][a-z][0-9][0-9]s[0-9][0-9]} $newlibcellname]]
+	if { $downsizable == 1 } {
+		set cellsensivity1 [ComputeSensitivity $tempcellname "downsize"]
 	}
-	if { $CellOperation == "upscale" } {
-	    set newlibcellName [getNextVtDown $libcellName]
-	    size_cell $cellName $newlibcellName
-            set newWNS [ PtWorstSlack clk ]
-            if { $newWNS < 0.0 } {
-                size_cell $cellName $libcellName
-            } else {
-                incr VtswapCnt
-
-
-                puts $outFp "- cell ${cellName} is swapped to $newlibcellName"
-            }
+	if { $upscable == 1 } {
+		set cellsensitivity2 [ComputeSensitivity $tempcellname "upscale"]
+	}
+	if { $downsizable && $upscable } {
+		if { $cellsensivity1 > $cellsensivity2 } {
+		 	dict set M m$k target $tempcellname
+    		dict set M m$k change "downsize"
+    		dict set M m$k sensitivity $cellsensivity1
+    		incr k
+    	}
+		else {
+ 			dict set M m$k target $tempcellname
+    	dict set M m$k change "upscale"
+    		dict set M m$k sensitivity $cellsensivity2
+    		incr k
+    	}
 	}
 }
+
 
 set finalWNS  [ PtWorstSlack clk ]
 set finalLeak [ PtLeakPower ]
@@ -202,4 +181,3 @@ puts $outFp "#Cell size swaps:\t${SizeswapCnt}"
 puts $outFp "Leakage improvment\t${improvment} %"
 
 close $outFp    
-
